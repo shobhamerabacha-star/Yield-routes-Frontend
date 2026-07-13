@@ -10,8 +10,6 @@ build/
 next-env.d.ts.bak
 
 # Env — never commit real secrets or API URLs meant to stay private
-.env
-.env.local
 .env.deployed
 !.env.example
 
@@ -21,8 +19,8 @@ next-env.d.ts.bak
 Thumbs.db
 
 # Editors
-.vscode/
 .idea/
 
 # TypeScript
 *.tsbuildinfo
+config.bat
