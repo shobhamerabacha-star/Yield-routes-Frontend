@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { format, formatDistanceToNow } from 'date-fns';
-import { AreaChart, Area, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { AreaChart, Area, LineChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from 'recharts';
 import type { PriceSnapshot } from '@/lib/types';
 import { Icon, type IconName } from '@/components/ui/Icon';
 
@@ -259,6 +259,151 @@ function SubmitPriceForm({ onSuccess }: { onSuccess: () => void }) {
   );
 }
 
+// ── Interactive Price History Chart with Pair Selector ──────────────────────
+function PriceHistoryChartSection({ prices }: { prices: PriceSnapshot[] }) {
+  const [selectedPairKey, setSelectedPairKey] = useState<string>('');
+
+  useEffect(() => {
+    if (prices.length > 0 && !selectedPairKey) {
+      setSelectedPairKey(`${prices[0].baseToken}:${prices[0].quoteToken}`);
+    }
+  }, [prices, selectedPairKey]);
+
+  const [baseToken, quoteToken] = selectedPairKey ? selectedPairKey.split(':') : ['', ''];
+
+  const { data: historyData, isLoading, isError } = useQuery({
+    queryKey: ['interactive-oracle-history', baseToken, quoteToken],
+    queryFn: () => api.getPriceHistory(baseToken, quoteToken, 24),
+    enabled: !!baseToken && !!quoteToken,
+    refetchInterval: REFETCH_INTERVAL,
+  });
+
+  const chartData = (historyData ?? []).slice().reverse().map((h: PriceSnapshot) => ({
+    time: format(new Date(h.recordedAt), 'HH:mm'),
+    price: Number((h.price / 1e9).toFixed(6)),
+    twapPrice: Number((h.twapPrice / 1e9).toFixed(6)),
+  }));
+
+  const activePair = prices.find(
+    p => p.baseToken === baseToken && p.quoteToken === quoteToken
+  );
+
+  return (
+    <div className="card-gradient p-5 space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold font-heading" style={v('--text-primary')}>
+            24h Price History Chart
+          </h2>
+          <p className="text-xs" style={v('--text-tertiary')}>
+            Interactive price & TWAP tracking with token pair selector
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label htmlFor="token-pair-select" className="text-xs font-medium" style={v('--text-muted')}>
+            Token Pair:
+          </label>
+          <select
+            id="token-pair-select"
+            value={selectedPairKey}
+            onChange={e => setSelectedPairKey(e.target.value)}
+            className="input py-1.5 px-3 text-xs font-mono rounded-lg cursor-pointer"
+            style={{ background: 'var(--surface-900)', color: 'var(--text-primary)', borderColor: 'var(--border-subtle)' }}
+          >
+            {prices.map(p => (
+              <option key={`${p.baseToken}:${p.quoteToken}`} value={`${p.baseToken}:${p.quoteToken}`}>
+                {p.baseToken.slice(0, 8)}… / {p.quoteToken.slice(0, 8)}…
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {activePair && (
+        <div className="flex items-center gap-4 text-xs font-mono">
+          <span style={v('--text-muted')}>
+            Current Spot: <strong style={v('--text-primary')}>{(activePair.price / 1e9).toFixed(6)}</strong>
+          </span>
+          <span style={v('--text-muted')}>
+            Current TWAP: <strong style={v('--primary-400')}>{(activePair.twapPrice / 1e9).toFixed(6)}</strong>
+          </span>
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="h-64 flex items-center justify-center">
+          <div className="flex items-center gap-2 text-xs" style={v('--text-muted')}>
+            <span className="w-4 h-4 border-2 border-primary-400 border-t-transparent rounded-full animate-spin" />
+            Loading 24h price history…
+          </div>
+        </div>
+      ) : isError ? (
+        <div className="h-48 flex items-center justify-center text-xs" style={v('--danger-400')}>
+          Failed to load 24h price history for selected pair
+        </div>
+      ) : chartData.length === 0 ? (
+        <div className="h-48 flex items-center justify-center text-xs" style={v('--text-muted')}>
+          No historical points recorded for this pair in the last 24h
+        </div>
+      ) : (
+        <div className="w-full h-72 pt-2">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
+              <XAxis
+                dataKey="time"
+                tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
+                axisLine={{ stroke: 'var(--border-subtle)' }}
+                tickLine={false}
+              />
+              <YAxis
+                domain={['auto', 'auto']}
+                tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
+                axisLine={{ stroke: 'var(--border-subtle)' }}
+                tickLine={false}
+                width={65}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: 'var(--surface-900)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 8,
+                  fontSize: 12,
+                }}
+                labelStyle={{ color: 'var(--text-muted)' }}
+                itemStyle={{ color: 'var(--text-secondary)' }}
+              />
+              <Legend
+                verticalAlign="top"
+                align="right"
+                wrapperStyle={{ paddingBottom: '12px', fontSize: '12px' }}
+              />
+              <Line
+                type="monotone"
+                dataKey="price"
+                name="Spot Price"
+                stroke="var(--violet-400)"
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 4 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="twapPrice"
+                name="TWAP Price"
+                stroke="var(--primary-400)"
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 4 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Oracle page ──────────────────────────────────────────────────────────
 export default function OraclePage() {
   const [search, setSearch] = useState('');
@@ -331,6 +476,11 @@ export default function OraclePage() {
           </div>
         ))}
       </div>
+
+      {/* Interactive 24h Price History Chart */}
+      {!isLoading && (prices ?? []).length > 0 && (
+        <PriceHistoryChartSection prices={prices ?? []} />
+      )}
 
       {/* Search */}
       <div className="relative">
